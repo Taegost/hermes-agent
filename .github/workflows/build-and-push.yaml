@@ -1,0 +1,23 @@
+name: Build and Publish
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+jobs:
+  build:
+    permissions:
+      id-token: write
+      contents: read
+    uses: Taegost/shared-workflows/.github/workflows/docker-build-push.yml@v1.0.1
+    with:
+      event_name: ${{ github.event_name }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_IMAGENAME: ${{ secrets.DOCKERHUB_IMAGENAME }}
