@@ -1,4 +1,4 @@
-FROM nousresearch/hermes-agent:v2026.6.19
+FROM nousresearch/hermes-agent:v2026.7.7.2
 USER root
 RUN uv pip install --python /opt/hermes/.venv/bin/python3 honcho-ai
 
