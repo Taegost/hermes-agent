@@ -9,6 +9,12 @@ on:
   schedule:
     - cron: '0 4 * * 1'
   workflow_dispatch:
+    inputs:
+      enable_from_cache:
+        description: 'Read from the Docker layer cache on this manual run (default: false, always pulls fresh base image layers)'
+        required: false
+        default: false
+        type: boolean
 jobs:
   build:
     permissions:
@@ -17,7 +23,5 @@ jobs:
     uses: Taegost/shared-workflows/.github/workflows/docker-build-push.yml@v2.0.0
     with:
       event_name: ${{ github.event_name }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_IMAGENAME: ${{ secrets.DOCKERHUB_IMAGENAME }}
+      enable_from_cache: ${{ inputs.enable_from_cache || false }}
+    secrets: inherit
