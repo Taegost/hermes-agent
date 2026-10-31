@@ -18,4 +18,8 @@ RUN ln -s /opt/hermes/tools/uv-*/uv /usr/local/bin/uv
 # npm 12 blocks postinstall scripts by default; claude-code needs its
 # postinstall to fetch the platform-native binary.
 RUN npm install -g --prefix /usr/local --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code
-USER hermes
+
+# No trailing USER directive: the base image runs s6-overlay as root so
+# cont-init.d can repair /opt/data ownership on boot; the supervised Hermes
+# services drop to the hermes user themselves (s6-rc.d/*/run).
+# Ending on USER hermes made PID1 uid 10000 and broke that bootstrap.
