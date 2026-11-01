@@ -74,7 +74,17 @@ Process for any Hermes version bump in this repo, in order:
 
 8. **Smoke test the real entrypoint.** Boot the container through the actual entrypoint so s6 runs. Testing with `--entrypoint bash` bypasses s6 entirely and cannot see bootstrap failures such as the `/opt/data` ownership problem. This blind spot is why the `USER hermes` regression survived the first smoke test and was only caught in PR review.
 
-9. **Deploy in three steps after the image swap.** Back up `/opt/data`, swap the image, then run `docker exec <container> hermes plugins install honcho` once. The plugin install is a one-time step per deployment because `/opt/data/installs` persists.
+9. **Deploy in three steps after the image swap.** Back up `/opt/data`, swap the image, then install the honcho plugin once (see the catalog caveat below). The plugin install is a one-time step per deployment because `/opt/data/installs` persists.
+
+   **Catalog caveat (verified 2026-11-01):** at Hermes v0.22.5 the built-in plugin catalog pinned a honcho commit (`2108daf4`) that fails to install standalone — uv lock resolution exits 1 because the pinned commit's dependency groups reference `hermes-agent` as a workspace member. The fix exists upstream on honcho main but no re-pinned Hermes release had shipped. Until Hermes re-pins its catalog, bypass it with an explicit `--ref` to the fixed commit:
+
+   ```bash
+   docker exec <container> hermes plugins uninstall honcho   # only if a partial install exists
+   docker exec <container> hermes plugins install honcho \
+     --ref 6f91136b4e8d4b41de75f05d0cea822a1520b3a4 --yes-deps --enable
+   ```
+
+   A ref-pinned install does not track the catalog pin — it stays on that commit until explicitly changed, so re-check the pin after the next Hermes release.
 
 ## Why This Matters
 
@@ -110,8 +120,11 @@ Deploy sequence after the image swap:
 ```bash
 # 1. Back up the persistent volume.
 # 2. Swap the image (recreate the container on the new tag).
-# 3. Install honcho once into the persistent volume.
-docker exec <container> hermes plugins install honcho
+# 3. Install honcho once into the persistent volume
+#    (plain install fails on the broken v0.22.5 catalog pin — see the
+#    catalog caveat in Prevention step 9 for the --ref workaround).
+docker exec <container> hermes plugins install honcho \
+  --ref 6f91136b4e8d4b41de75f05d0cea822a1520b3a4 --yes-deps --enable
 ```
 
 Wrong versus right on the three easy-to-miss points:
