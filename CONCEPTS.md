@@ -18,3 +18,10 @@ The container's first startup phase, in which the PID 1 supervisor runs as root 
 
 ### Persistent data volume
 The storage mounted into the Hermes container that carries state and plugin installs across container recreation and image updates. Anything written here survives upgrades, which is what makes one-time post-deploy steps sufficient.
+
+## Agent–sandbox integration
+
+### Env passthrough
+The owner-approved, per-variable forwarding of environment variables from the agent pod into sandbox sessions over SSH, so tools running in the sandbox receive credentials and settings.
+
+Three conditions must all hold or nothing transfers, and each fails silently on its own: the client must instruct sending (explicit per-variable list), the server must permit receiving, and the client's config block must match the hostname form the application actually dials — alias and FQDN are different match keys. Every forwarded variable is readable by code running in the sandbox, so the forwarding list is owner policy decided per variable, never a wildcard.
