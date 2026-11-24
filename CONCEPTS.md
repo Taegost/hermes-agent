@@ -5,7 +5,7 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 ## Hermes Wrapper Image
 
 ### Wrapper image
-The thin Docker image this repository builds on top of the upstream Hermes Agent base image. It carries deployment-specific additions (PATH symlinks, global CLIs) and nothing else; behavior changes belong upstream or in runtime configuration, not baked into it.
+The thin Docker image this repository builds on top of the upstream Hermes Agent base image. It carries deployment-specific additions (PATH symlinks, global CLIs) and nothing else; behavior changes belong upstream or in runtime configuration, not baked into it. One owner-approved exception: the image-wide default editor environment (EDITOR/VISUAL) is baked in, because a container with no editor breaks interactive tooling at the base image and no runtime hook covers it.
 
 ### PM (package management)
 Hermes's subsystem that owns installation of runtimes and third-party tooling. It treats the shipped Python environment as sealed, reverts manual mutations on repair, and admits third-party tools as runtime plugins that install into the persistent data volume rather than the image.
