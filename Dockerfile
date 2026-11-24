@@ -1,5 +1,12 @@
-FROM nousresearch/hermes-agent:v0.22.5
+FROM nousresearch/hermes-agent:v0.23.4
 USER root
+
+# Editor: nano, defaulted image-wide via EDITOR/VISUAL.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nano \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV EDITOR=nano VISUAL=nano
 
 # Expose the pm-pinned uv on PATH.
 RUN ln -s /opt/hermes/tools/uv-*/uv /usr/local/bin/uv
