@@ -19,6 +19,11 @@ The container's first startup phase, in which the PID 1 supervisor runs as root 
 ### Persistent data volume
 The storage mounted into the Hermes container that carries state and plugin installs across container recreation and image updates. Anything written here survives upgrades, which is what makes one-time post-deploy steps sufficient.
 
+### Plugin catalog
+Hermes's built-in directory of installable runtime plugins, each entry pinning a specific upstream commit that plain plugin installs resolve against.
+
+A broken pin blocks plain installs with no local cause — dependency resolution against the pinned commit can fail even when a fixed commit exists upstream. The bypass is an explicit commit override, which then stops tracking the catalog entirely: the install stays on that overridden commit until deliberately moved back to the pin. Pins are re-verified at every base-image bump, and retired bypasses are recorded in the migration learning rather than silently dropped.
+
 ## Agent–sandbox integration
 
 ### Env passthrough

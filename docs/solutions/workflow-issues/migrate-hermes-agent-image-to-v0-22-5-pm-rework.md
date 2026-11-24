@@ -1,6 +1,7 @@
 ---
 title: "Migrating the hermes-agent wrapper image across a major Hermes overhaul (v2026.8.3 → v0.22.5)"
 date: 2026-10-31
+last_updated: 2026-11-24
 category: workflow-issues
 module: docker-image
 problem_type: workflow_issue
@@ -11,6 +12,7 @@ applies_when:
   - "Moving from date-versioned tags (v2026.8.3) to semver tags (v0.22.5)"
   - "Restoring uv or global npm tools on PATH in v0.22.x-derived images"
   - "Adding third-party Python tools (such as honcho-ai) to a Hermes deployment"
+  - "Installing honcho on Hermes v0.23.x+ (catalog pin works; the --ref workaround is v0.22.5-era history)"
   - "Choosing the final USER in a Dockerfile derived from hermes-agent v0.22.x"
 symptoms:
   - "uv resolves nowhere on PATH in v0.22.x images (pm-pinned at /opt/hermes/tools/uv-*/uv)"
@@ -31,6 +33,8 @@ tags:
   - npm
   - s6-overlay
   - honcho
+  - plugin-catalog
+  - smoke-test
   - migration
 ---
 
@@ -68,29 +72,40 @@ Process for any Hermes version bump in this repo, in order:
 
 5. **Do not bake third-party Python tools into the base venv.** v0.22.x seals `/opt/hermes/.venv`. Never mutate it with raw `pip` or `uv` — `hermes pm repair` reverts any such change. Third-party tools such as `honcho-ai` are admitted at runtime instead: `hermes plugins install honcho` installs into `/opt/data/installs`, which sits on the persistent volume. The install survives container recreation and image updates.
 
-6. **Keep the final `USER` as root.** The base image's s6 PID 1 bootstrap must run as root to chown and repair `/opt/data` ownership (via `cont-init.d` scripts); the supervised services then drop to the `hermes` user themselves. A trailing `USER hermes` broke the bootstrap — this was caught in PR review, not by the first smoke test. Add no `USER hermes` line at the end of the Dockerfile.
+6. **Keep the final `USER` as root.** The base image's s6 PID 1 bootstrap must run as root to chown and repair `/opt/data` ownership (via the scripts in `/etc/cont-init.d/` — not the s6-overlay v3 documented path `/etc/s6-overlay/cont-init.d/`, which is empty on hermes-agent images); the supervised services then drop to the `hermes` user themselves. A trailing `USER hermes` broke the bootstrap — this was caught in PR review, not by the first smoke test. Add no `USER hermes` line at the end of the Dockerfile.
 
 7. **Confirm tool-pinning decisions with the owner.** Claude Code stays UNPINNED by deliberate owner decision: `npm install -g @anthropic-ai/claude-code` pulls the latest version at each build. The owner rejected restoring the version pin despite repo history of pinning (auto memory [claude]: repo owner Mike must be consulted before design decisions such as install locations, version pinning, and paradigm choices; both `uv` and `claude` must resolve on PATH in the final image, and `@anthropic-ai/claude-code` stays unpinned). Do not silently change pinning policy during a bump.
 
-8. **Smoke test the real entrypoint.** Boot the container through the actual entrypoint so s6 runs. Testing with `--entrypoint bash` bypasses s6 entirely and cannot see bootstrap failures such as the `/opt/data` ownership problem. This blind spot is why the `USER hermes` regression survived the first smoke test and was only caught in PR review.
+8. **Smoke test the real entrypoint.** Boot the container through the actual entrypoint so s6 runs. Testing with `--entrypoint bash` bypasses s6 entirely and cannot see bootstrap failures such as the `/opt/data` ownership problem. This blind spot is why the `USER hermes` regression survived the first smoke test and was only caught in PR review. Detached smoke runs need a TTY — `docker run -d -t` — or the booted gateway exits cleanly on stdin EOF (see the v0.23.4 update below).
 
 9. **Deploy in three steps after the image swap.** Back up `/opt/data`, swap the image, then install the honcho plugin once (see the catalog caveat below). The plugin install is a one-time step per deployment because `/opt/data/installs` persists.
 
-   **Catalog caveat (verified 2026-11-01):** at Hermes v0.22.5 the built-in plugin catalog pinned a honcho commit (`2108daf4`) that fails to install standalone — uv lock resolution exits 1 because the pinned commit's dependency groups reference `hermes-agent` as a workspace member. The fix exists upstream on honcho main but no re-pinned Hermes release had shipped. Until Hermes re-pins its catalog, bypass it with an explicit `--ref` to the fixed commit:
+   **Catalog caveat (v0.22.5-era condition; FIXED by v0.23.4 — verified 2026-11-24):** at Hermes v0.22.5 the built-in plugin catalog pinned a honcho commit (`2108daf4`) that failed to install standalone — uv lock resolution exited 1 because the pinned commit's dependency groups reference `hermes-agent` as a workspace member. Upstream then re-pinned the catalog (and v0.23.1 raised the catalog size cap so the live catalog is honored again); on v0.23.4 the plain catalog install works clean — verified: honcho 1.2.0, enabled, persisted in `/opt/data/installs`. Use the plain install on v0.23.x+:
 
    ```bash
-   docker exec <container> hermes plugins uninstall honcho   # only if a partial install exists
-   docker exec <container> hermes plugins install honcho \
-     --ref 6f91136b4e8d4b41de75f05d0cea822a1520b3a4 --yes-deps --enable
+   # v0.23.4+: catalog pin works — no --ref.
+   docker exec <container> hermes plugins install honcho --yes-deps --enable
    ```
 
-   A ref-pinned install does not track the catalog pin — it stays on that commit until explicitly changed, so re-check the pin after the next Hermes release.
+   The earlier `--ref 6f91136b4e8d4b41de75f05d0cea822a1520b3a4` bypass is retained as v0.22.5-era history and as the fallback shape if a future catalog pin breaks again. A ref-pinned install does not track the catalog pin — it stays on that commit until explicitly changed — so deployments still carrying it should move to the catalog pin. v0.23.4 also ships a `hermes plugins update` subcommand for moving installed plugins forward.
+
+## v0.23.4 Update (2026-11-24)
+
+Second bump executed under this checklist: v0.22.5 → v0.23.4, plus nano as image-wide editor (commit `7706af3` on `feat/nano-editor-base-bump-v0.23.4`). Every wrapper assumption above held unchanged — same uv glob symlink (`uv-0.13.5`), sealed venv, identical `/etc/cont-init.d/` script set, node 26 / npm 12 flags, `USER root`, unpinned claude (2.1.331). The checklist re-run cost minutes and caught no regressions — which is the checklist working, not a reason to skip it. New findings from this bump:
+
+1. **Catalog caveat retired** — see step 9; plain catalog install verified working on v0.23.4.
+2. **`cont-init.d` lives at `/etc/cont-init.d/`** on hermes-agent images, not the s6-overlay v3 documented path (`/etc/s6-overlay/cont-init.d/` — empty here). If the layout moves again: `find /etc -maxdepth 3 -name 'cont-init.d' -type d`.
+3. **Detached smoke containers need a TTY**: `docker run -d -t`. Without `-t`, the gateway boots fully (welcome banner, all s6 services up) then the container exits cleanly on stdin EOF — it looks like a boot crash but is a clean shutdown. Read the `docker logs` tail for services-up before diagnosing a "boot failure".
+4. **Interrupted plugin installs leave orphans** in `/opt/data/installs` on the persistent volume with the plugin unregistered. Fix: `hermes plugins uninstall honcho` (safe no-op when unregistered), then reinstall.
+5. **New cosmetic warning on v0.23.4**: every hermes CLI invocation prints `install out of sync (pnpm: not installed or outdated) — this docker-managed install must rebuild the artifact to fix`. pnpm is absent in both v0.22.5 (no warning) and v0.23.4 (warning); CLI and s6 boot are fully functional. Do not chase it, do not add pnpm to the image to silence it.
+6. **Image grew 3.01GB → 3.23GB** (v0.23.0 shipped the Webapp bundle, tmux, and Office/PDF libraries in-image). Budget deployment-host disk accordingly.
 
 ## Why This Matters
 
 - **No bump is routine.** Hermes is known for shipping breaking changes in almost every update. This migration changed versioning scheme, build layout, toolchain, venv policy, plugin policy, and process supervision at once. A bump treated as a tag edit would have produced an image where `uv` and `claude` are missing from PATH, global npm installs vanish, the venv mutates and gets reverted, and the container fails to boot.
 - **Documentation can lag reality.** The Honcho point is the cautionary example: the safest reading of the Hermes + Honcho docs suggested baking honcho into the image, but the running install proved `hermes plugins install` (runtime admission into the persistent volume) is the supported path. Source verification plus a real install beat doc inference. Repeating the full review against both sources on every bump is the only reliable defense.
 - **Entry-point-bypassing tests hide bootstrap bugs.** The `USER hermes` regression was invisible to a `--entrypoint bash` smoke test because s6 never ran. A passing smoke test that never booted PID 1 gave false confidence; only PR review caught it. Smoke tests must exercise the same startup path as production.
+- **Version-pinned workarounds rot faster than setups.** The `--ref` catalog bypass — the most specific advice in this doc — was dead one release later; upstream re-pinned and the plain install worked again. Re-validate every documented workaround at each bump and retire it loudly when obsolete, or the next migration inherits a stale command that silently pins honcho to an old commit.
 
 ## When to Apply
 
@@ -99,6 +114,8 @@ Process for any Hermes version bump in this repo, in order:
 - Whenever adding third-party Python tooling to the environment — install at runtime via `hermes plugins install`, never into `/opt/hermes/.venv`.
 - Whenever container boot fails after an image update — check the final `USER` directive and verify the smoke test actually ran s6, not `--entrypoint bash`.
 - Whenever pinning policy (Claude Code, uv location) is in question — consult the owner before changing it (auto memory [claude]).
+- On Hermes v0.23.x+: install honcho from the catalog pin (no `--ref`); if a deployment still carries the v0.22.5-era ref-pinned install, move it to the catalog pin.
+- Detached smoke tests always: `docker run -d -t`.
 
 ## Examples
 
@@ -120,11 +137,11 @@ Deploy sequence after the image swap:
 ```bash
 # 1. Back up the persistent volume.
 # 2. Swap the image (recreate the container on the new tag).
-# 3. Install honcho once into the persistent volume
-#    (plain install fails on the broken v0.22.5 catalog pin — see the
-#    catalog caveat in Prevention step 9 for the --ref workaround).
-docker exec <container> hermes plugins install honcho \
-  --ref 6f91136b4e8d4b41de75f05d0cea822a1520b3a4 --yes-deps --enable
+# 3. Install honcho once into the persistent volume.
+#    v0.23.4+: plain catalog install, verified 2026-11-24. The --ref bypass
+#    in Guidance step 9 is v0.22.5-era history — use it only if a future
+#    catalog pin breaks again.
+docker exec <container> hermes plugins install honcho --yes-deps --enable
 ```
 
 Wrong versus right on the three easy-to-miss points:
@@ -145,8 +162,9 @@ Smoke test shape — boot the real entrypoint and verify both tools resolve:
 
 ```bash
 # Boots s6 PID 1 as production does; a `--entrypoint bash` run proves nothing
-# about bootstrap ownership.
-docker run -d --name smoke <image>
+# about bootstrap ownership. The -t matters: without a TTY the booted gateway
+# exits cleanly on stdin EOF and looks like a boot failure.
+docker run -d -t --name smoke <image>
 docker exec smoke which uv
 docker exec smoke which claude
 docker exec smoke claude --version
@@ -157,3 +175,4 @@ docker exec smoke claude --version
 - [PR #1 — Bump Hermes Agent to v0.22.5, adapt image for new PM layout](https://github.com/Taegost/hermes-agent/pull/1) — the change this document describes (merged 2026-10-31).
 - [Hermes Agent v0.22.5 release notes](https://github.com/NousResearch/hermes-agent/releases/tag/v0.22.5) — authoritative source for the package-management layout this migration adapts to.
 - [NousResearch/hermes-agent#130715](https://github.com/NousResearch/hermes-agent/issues/130715) — s6-overlay lifecycle in the official Docker image; same s6 bootstrap contract that keeps derived images on USER root.
+- Branch `feat/nano-editor-base-bump-v0.23.4`, commit `7706af3` — the v0.23.4 bump + nano editor recorded in the update section above; [v0.23.4 release notes](https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.4).
